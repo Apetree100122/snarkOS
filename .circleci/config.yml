@@ -409,3 +409,18 @@ workflows:
                 - testnet3
     jobs:
       - integration
+orbs:
+  codecov: codecov/codecov@3.0.0
+  jobs:
+  example-job:
+    docker:
+      # replace with your preferred image
+      - image: cimg/base:stable
+    steps:
+      - codecov/upload:
+          validate_url: true 
+
+workflows:
+  example-workflow:
+    jobs:
+      - example-job
