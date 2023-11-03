@@ -14,7 +14,8 @@
 
 use super::*;
 
-use bincode::Options;
+use snarkvm::prelude::{FromBytes, ToBytes};
+
 use std::borrow::Cow;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,18 +29,61 @@ impl MessageTrait for PeerResponse {
     fn name(&self) -> Cow<'static, str> {
         "PeerResponse".into()
     }
+}
 
-    /// Serializes the message into the buffer.
-    #[inline]
-    fn serialize<W: Write>(&self, writer: &mut W) -> Result<()> {
-        Ok(bincode::serialize_into(writer, &self.peers)?)
+impl ToBytes for PeerResponse {
+    fn write_le<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
+        // Restrict the maximum number of peers to share.
+        (self.peers.len().min(u8::MAX as usize) as u8).write_le(&mut writer)?;
+        for peer in self.peers.iter().take(u8::MAX as usize) {
+            peer.write_le(&mut writer)?;
+        }
+        Ok(())
+    }
+}
+
+impl FromBytes for PeerResponse {
+    fn read_le<R: io::Read>(mut reader: R) -> io::Result<Self> {
+        let count = u8::read_le(&mut reader)?;
+        let mut peers = Vec::with_capacity(count as usize);
+        for _ in 0..count {
+            peers.push(SocketAddr::read_le(&mut reader)?);
+        }
+
+        Ok(Self { peers })
+    }
+}
+
+#[cfg(test)]
+pub mod prop_tests {
+    use crate::PeerResponse;
+    use snarkvm::utilities::{FromBytes, ToBytes};
+
+    use bytes::{Buf, BufMut, BytesMut};
+    use proptest::{
+        collection::vec,
+        prelude::{any, BoxedStrategy, Strategy},
+    };
+    use std::net::{IpAddr, SocketAddr};
+    use test_strategy::proptest;
+
+    pub fn any_valid_socket_addr() -> BoxedStrategy<SocketAddr> {
+        any::<(IpAddr, u16)>().prop_map(|(ip_addr, port)| SocketAddr::new(ip_addr, port)).boxed()
     }
 
-    /// Deserializes the given buffer into a message.
-    #[inline]
-    fn deserialize(bytes: BytesMut) -> Result<Self> {
-        let options =
-            bincode::options().with_limit(MAXIMUM_MESSAGE_SIZE as u64).with_fixint_encoding().allow_trailing_bytes();
-        Ok(Self { peers: options.deserialize_from(&mut bytes.reader())? })
+    pub fn any_vec() -> BoxedStrategy<Vec<SocketAddr>> {
+        vec(any_valid_socket_addr(), 0..50).prop_map(|v| v).boxed()
+    }
+
+    pub fn any_peer_response() -> BoxedStrategy<PeerResponse> {
+        any_vec().prop_map(|peers| PeerResponse { peers }).boxed()
+    }
+
+    #[proptest]
+    fn peer_response_roundtrip(#[strategy(any_peer_response())] peer_response: PeerResponse) {
+        let mut bytes = BytesMut::default().writer();
+        peer_response.write_le(&mut bytes).unwrap();
+        let decoded = PeerResponse::read_le(&mut bytes.into_inner().reader()).unwrap();
+        assert_eq!(decoded, peer_response);
     }
 }

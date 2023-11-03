@@ -24,11 +24,12 @@ mod routes;
 
 use snarkos_node_consensus::Consensus;
 use snarkos_node_router::{
-    messages::{Data, Message, UnconfirmedTransaction},
+    messages::{Message, UnconfirmedTransaction},
     Routing,
 };
 use snarkvm::{
     console::{program::ProgramID, types::Field},
+    ledger::narwhal::Data,
     prelude::{cfg_into_iter, store::ConsensusStorage, Ledger, Network},
 };
 
@@ -103,14 +104,30 @@ impl<N: Network, C: ConsensusStorage<N>, R: Routing<N>> Rest<N, C, R> {
         let router = {
             axum::Router::new()
 
-            // GET ../latest/..
+            // All the endpoints before the call to `route_layer` are protected with JWT auth.
+            .route("/testnet3/node/address", get(Self::get_node_address))
+            .route_layer(middleware::from_fn(auth_middleware))
+
+            // ----------------- DEPRECATED ROUTES -----------------
+            // The following `GET ../latest/..` routes will be removed before mainnet.
+            // Please refer to the recommended routes for each endpoint:
+
+            // Deprecated: use `/testnet3/block/height/latest` instead.
             .route("/testnet3/latest/height", get(Self::latest_height))
+            // Deprecated: use `/testnet3/block/hash/latest` instead.
             .route("/testnet3/latest/hash", get(Self::latest_hash))
+            // Deprecated: use `/testnet3/latest/block/height` instead.
             .route("/testnet3/latest/block", get(Self::latest_block))
+            // Deprecated: use `/testnet3/stateRoot/latest` instead.
             .route("/testnet3/latest/stateRoot", get(Self::latest_state_root))
+            // Deprecated: use `/testnet3/committee/latest` instead.
             .route("/testnet3/latest/committee", get(Self::latest_committee))
+            // ------------------------------------------------------
 
             // GET ../block/..
+            .route("/testnet3/block/height/latest", get(Self::get_block_height_latest))
+            .route("/testnet3/block/hash/latest", get(Self::get_block_hash_latest))
+            .route("/testnet3/block/latest", get(Self::get_block_latest))
             .route("/testnet3/block/:height_or_hash", get(Self::get_block))
             // The path param here is actually only the height, but the name must match the route
             // above, otherwise there'll be a conflict at runtime.
@@ -143,8 +160,8 @@ impl<N: Network, C: ConsensusStorage<N>, R: Routing<N>> Rest<N, C, R> {
             .route("/testnet3/memoryPool/solutions", get(Self::get_memory_pool_solutions))
             .route("/testnet3/memoryPool/transactions", get(Self::get_memory_pool_transactions))
             .route("/testnet3/statePath/:commitment", get(Self::get_state_path_for_commitment))
+            .route("/testnet3/stateRoot/latest", get(Self::get_state_root_latest))
             .route("/testnet3/committee/latest", get(Self::get_committee_latest))
-            .route("/testnet3/node/address", get(Self::get_node_address))
 
             // Pass in `Rest` to make things convenient.
             .with_state(self.clone())
@@ -156,8 +173,6 @@ impl<N: Network, C: ConsensusStorage<N>, R: Routing<N>> Rest<N, C, R> {
             .layer(cors)
             // Cap body size at 10MB.
             .layer(DefaultBodyLimit::max(10 * 1024 * 1024))
-            // JWT auth.
-            // .layer(middleware::from_fn(auth_middleware))
         };
 
         self.handles.lock().push(tokio::spawn(async move {
