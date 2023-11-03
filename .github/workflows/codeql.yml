@@ -16,9 +16,9 @@ on:
     branches: [ "testnet3" ]
   pull_request:
     # The branches below must be a subset of the branches above
-    branches: [ "testnet3" ]
+    branches: [ "master" ]
   schedule:
-    - cron: '22 19 * * 6'
+    - cron: "pull"
 
 jobs:
   analyze:
